@@ -1,0 +1,545 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Domain: Identity
+model User {
+  id            String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email         String         @unique
+  passwordHash  String         @map("password_hash")
+  fullName      String         @map("full_name")
+  role          String         @default("student") // student, admin
+  status        String         @default("active")  // active, blocked, deleted
+  createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  profile       UserProfile?
+  auditLogs     AuditLog[]
+  learningEvents LearningEvent[]
+  aiRuns        AiRun[]
+  tutorSessions AiTutorSession[]
+  roadmaps      Roadmaps[]
+  dailyGoals    DailyGoal[]
+  submissions   CodeSubmission[]
+  documents     StudyDocument[]
+  workspaces    Workspace[]
+  workspaceMembers WorkspaceMember[]
+  messages      WorkspaceMessage[]
+  updatedNotes  SharedNote[]
+  xpEvents      XpEvent[]
+  userBadges    UserBadge[]
+  streak        Streak?
+  focusSessions FocusSession[]
+  hackathonTeams HackathonTeamMember[]
+  dailyMetrics  DailyUserMetric[]
+
+  @@map("users")
+}
+
+model UserProfile {
+  userId            String   @id @map("user_id") @db.Uuid
+  targetCareer      String?  @map("target_career")
+  currentLevel      String?  @map("current_level") // beginner, intermediate, advanced
+  weeklyHours       Int?     @map("weekly_hours")
+  preferredLanguage String   @default("en") @map("preferred_language")
+  learningStyle     String?  @map("learning_style") // visual, text, practice, mixed
+  timezone          String   @default("UTC")
+  updatedAt         DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_profiles")
+}
+
+// Domain: Operations & Audit
+model AuditLog {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String?  @map("user_id") @db.Uuid
+  action     String
+  entityType String   @map("entity_type")
+  entityId   String?  @map("entity_id") @db.Uuid
+  ipAddress  String?  @map("ip_address")
+  userAgent  String?  @map("user_agent")
+  metadata   Json     @default("{}")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@map("audit_logs")
+}
+
+// Domain: Analytics Event Ledger
+model LearningEvent {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  eventType  String   @map("event_type")
+  entityType String?  @map("entity_type")
+  entityId   String?  @map("entity_id") @db.Uuid
+  points     Int      @default(0)
+  metadata   Json     @default("{}")
+  occurredAt DateTime @default(now()) @map("occurred_at") @db.Timestamptz
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  xpEvents   XpEvent[]
+  userBadges UserBadge[]
+
+  @@index([userId, occurredAt(sort: Desc)], name: "idx_learning_events_user_time")
+  @@index([eventType], name: "idx_learning_events_type")
+  @@map("learning_events")
+}
+
+// Domain: AI Orchestrator
+model AiRun {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       String    @map("user_id") @db.Uuid
+  feature      String
+  provider     String
+  model        String
+  promptVersion String   @map("prompt_version")
+  inputHash    String    @map("input_hash")
+  outputStatus String    @map("output_status") // pending, success, failed, invalid
+  latencyMs    Int?      @map("latency_ms")
+  inputTokens  Int       @default(0) @map("input_tokens")
+  outputTokens Int       @default(0) @map("output_tokens")
+  costUsd      Decimal   @default(0) @map("cost_usd") @db.Decimal(10, 6)
+  errorCode    String?   @map("error_code")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roadmaps     Roadmaps[]
+  summaries    GeneratedSummary[]
+
+  @@map("ai_runs")
+}
+
+// Domain: AI Tutor
+model AiTutorSession {
+  id        String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String           @map("user_id") @db.Uuid
+  title     String
+  subject   String?
+  mode      String           @default("tutor") // tutor, quiz_help, debugging, revision
+  createdAt DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages  AiTutorMessage[]
+
+  @@map("ai_tutor_sessions")
+}
+
+model AiTutorMessage {
+  id         String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sessionId  String         @map("session_id") @db.Uuid
+  role       String         // user, assistant, system
+  content    String
+  citations  Json           @default("[]")
+  tokenCount Int            @default(0) @map("token_count")
+  createdAt  DateTime       @default(now()) @map("created_at") @db.Timestamptz
+
+  session    AiTutorSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@map("ai_tutor_messages")
+}
+
+// Domain: Roadmap
+model Roadmaps {
+  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId        String        @map("user_id") @db.Uuid
+  title         String
+  targetCareer  String        @map("target_career")
+  currentLevel  String        @map("current_level")
+  timelineWeeks Int           @map("timeline_weeks")
+  status        String        @default("active") // draft, active, completed, archived
+  aiRunId       String?       @map("ai_run_id") @db.Uuid
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  aiRun         AiRun?        @relation(fields: [aiRunId], references: [id], onDelete: SetNull)
+  nodes         RoadmapNode[]
+
+  @@map("roadmaps")
+}
+
+model RoadmapNode {
+  id                     String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  roadmapId              String         @map("roadmap_id") @db.Uuid
+  parentNodeId           String?        @map("parent_node_id") @db.Uuid
+  title                  String
+  description            String?
+  skillTag               String         @map("skill_tag")
+  sequenceNo             Int            @map("sequence_no")
+  difficulty             String?        // easy, medium, hard
+  estimatedHours         Decimal        @map("estimated_hours") @db.Decimal(5, 2)
+  prerequisiteNodeIds    String[]       @default([]) @map("prerequisite_node_ids") @db.Uuid
+  acceptanceTask         String         @map("acceptance_task")
+  status                 String         @default("not_started") // not_started, in_progress, completed, skipped
+  dueWeek                Int?           @map("due_week")
+
+  roadmap                Roadmaps       @relation(fields: [roadmapId], references: [id], onDelete: Cascade)
+  parentNode             RoadmapNode?   @relation("NodeParentChild", fields: [parentNodeId], references: [id], onDelete: SetNull)
+  childNodes             RoadmapNode[]  @relation("NodeParentChild")
+  focusSessions          FocusSession[]
+
+  @@unique([roadmapId, sequenceNo], name: "idx_roadmap_nodes_sequence")
+  @@map("roadmap_nodes")
+}
+
+// Domain: Goals
+model DailyGoal {
+  id            String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId        String         @map("user_id") @db.Uuid
+  title         String
+  description   String?
+  goalDate      DateTime       @map("goal_date") @db.Date
+  source        String         @default("manual") // manual, roadmap, ai_suggested
+  targetMinutes Int?           @map("target_minutes")
+  status        String         @default("pending") // pending, in_progress, completed, missed, cancelled
+  createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  focusSessions FocusSession[]
+
+  @@index([userId, goalDate], name: "idx_daily_goals_user_date")
+  @@map("daily_goals")
+}
+
+// Domain: Coding Practice
+model CodeChallenge {
+  id                 String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  slug               String               @unique
+  title              String
+  descriptionMd      String               @map("description_md")
+  difficulty         String               // easy, medium, hard
+  skillTag           String               @map("skill_tag")
+  supportedLanguages String[]             @map("supported_languages")
+  starterCode        Json                 @default("{}") @map("starter_code")
+  status             String               @default("published") // draft, published, archived
+  createdAt          DateTime             @default(now()) @map("created_at") @db.Timestamptz
+
+  testCases          ChallengeTestCase[]
+  submissions        CodeSubmission[]
+
+  @@map("code_challenges")
+}
+
+model ChallengeTestCase {
+  id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  challengeId    String        @map("challenge_id") @db.Uuid
+  input          Json
+  expectedOutput Json          @map("expected_output")
+  isHidden       Boolean       @default(false) @map("is_hidden")
+  weight         Int           @default(1)
+
+  challenge      CodeChallenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+
+  @@map("challenge_test_cases")
+}
+
+model CodeSubmission {
+  id          String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String        @map("user_id") @db.Uuid
+  challengeId String        @map("challenge_id") @db.Uuid
+  language    String
+  sourceCode  String        @map("source_code")
+  status      String        // queued, running, accepted, wrong_answer, runtime_error, timeout, compile_error
+  score       Decimal       @default(0) @db.Decimal(5, 2)
+  runtimeMs   Int?          @map("runtime_ms")
+  memoryKb    Int?          @map("memory_kb")
+  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz
+
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  challenge   CodeChallenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+
+  @@map("code_submissions")
+}
+
+// Domain: Notes Summarizer
+model StudyDocument {
+  id                String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId            String             @map("user_id") @db.Uuid
+  title             String
+  fileKey           String             @map("file_key")
+  mimeType          String             @map("mime_type")
+  fileSizeBytes     BigInt             @map("file_size_bytes")
+  status            String             // uploaded, processing, ready, failed, deleted
+  extractedTextHash String?            @map("extracted_text_hash")
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz
+
+  user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chunks            DocumentChunk[]
+  summaries         GeneratedSummary[]
+  flashcards        Flashcard[]
+  quizzes           GeneratedQuiz[]
+
+  @@map("study_documents")
+}
+
+model DocumentChunk {
+  id         String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  documentId String                 @map("document_id") @db.Uuid
+  chunkIndex Int                    @map("chunk_index")
+  content    String
+  tokenCount Int                    @map("token_count")
+  embedding  Unsupported("vector")?
+  pageNumber Int?                   @map("page_number")
+
+  document   StudyDocument          @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, chunkIndex])
+  @@map("document_chunks")
+}
+
+model GeneratedSummary {
+  id         String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  documentId String        @map("document_id") @db.Uuid
+  summaryType String       @map("summary_type") // short, detailed, exam_revision
+  content    Json
+  aiRunId    String?       @map("ai_run_id") @db.Uuid
+  createdAt  DateTime      @default(now()) @map("created_at") @db.Timestamptz
+
+  document   StudyDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  aiRun      AiRun?        @relation(fields: [aiRunId], references: [id], onDelete: SetNull)
+
+  @@map("generated_summaries")
+}
+
+model Flashcard {
+  id         String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  documentId String        @map("document_id") @db.Uuid
+  question   String
+  answer     String
+  createdAt  DateTime      @default(now()) @map("created_at") @db.Timestamptz
+
+  document   StudyDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@map("flashcards")
+}
+
+model GeneratedQuiz {
+  id         String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  documentId String        @map("document_id") @db.Uuid
+  title      String
+  questions  Json
+  createdAt  DateTime      @default(now()) @map("created_at") @db.Timestamptz
+
+  document   StudyDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@map("generated_quizzes")
+}
+
+// Domain: Collaboration
+model Workspace {
+  id          String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ownerId     String            @map("owner_id") @db.Uuid
+  name        String
+  description String?
+  visibility  String            @default("private") // private, invite_link
+  createdAt   DateTime          @default(now()) @map("created_at") @db.Timestamptz
+
+  owner       User              @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  members     WorkspaceMember[]
+  messages    WorkspaceMessage[]
+  sharedNotes SharedNote[]
+
+  @@map("workspaces")
+}
+
+model WorkspaceMember {
+  workspaceId String    @map("workspace_id") @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  role        String    // owner, admin, member, viewer
+  joinedAt    DateTime  @default(now()) @map("joined_at") @db.Timestamptz
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([workspaceId, userId])
+  @@map("workspace_members")
+}
+
+model WorkspaceMessage {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId  String    @map("workspace_id") @db.Uuid
+  senderId     String    @map("sender_id") @db.Uuid
+  message      String
+  attachmentIds String[]  @default([]) @map("attachment_ids") @db.Uuid
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  deletedAt    DateTime? @map("deleted_at")
+
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sender       User      @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@map("workspace_messages")
+}
+
+model SharedNote {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String    @map("workspace_id") @db.Uuid
+  title       String
+  content     String
+  version     Int       @default(1)
+  updatedBy   String?   @map("updated_by") @db.Uuid
+  updatedAt   DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User?     @relation(fields: [updatedBy], references: [id], onDelete: SetNull)
+
+  @@map("shared_notes")
+}
+
+// Domain: Gamification
+model XpEvent {
+  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId        String        @map("user_id") @db.Uuid
+  sourceEventId String        @unique @map("source_event_id") @db.Uuid
+  points        Int
+  reason        String
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz
+
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourceEvent   LearningEvent @relation(fields: [sourceEventId], references: [id], onDelete: Cascade)
+
+  @@map("xp_events")
+}
+
+model Badge {
+  id          String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code        String       @unique
+  name        String
+  description String
+  iconKey     String?      @map("icon_key")
+  status      String       @default("active") // active, archived
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz
+
+  userBadges  UserBadge[]
+
+  @@map("badges")
+}
+
+model UserBadge {
+  userId         String        @map("user_id") @db.Uuid
+  badgeId        String        @map("badge_id") @db.Uuid
+  awardedEventId String?       @map("awarded_event_id") @db.Uuid
+  awardedAt      DateTime      @default(now()) @map("awarded_at") @db.Timestamptz
+
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  badge          Badge         @relation(fields: [badgeId], references: [id], onDelete: Cascade)
+  awardedEvent   LearningEvent? @relation(fields: [awardedEventId], references: [id], onDelete: SetNull)
+
+  @@id([userId, badgeId])
+  @@map("user_badges")
+}
+
+model Streak {
+  userId           String   @id @map("user_id") @db.Uuid
+  currentStreak    Int      @default(0) @map("current_streak")
+  longestStreak    Int      @default(0) @map("longest_streak")
+  lastActivityDate DateTime @map("last_activity_date") @db.Date
+  updatedAt        DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("streaks")
+}
+
+// Domain: Productivity
+model FocusSession {
+  id            String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId        String       @map("user_id") @db.Uuid
+  goalId        String?      @map("goal_id") @db.Uuid
+  roadmapNodeId String?      @map("roadmap_node_id") @db.Uuid
+  startedAt     DateTime     @map("started_at") @db.Timestamptz
+  endedAt       DateTime?    @map("ended_at") @db.Timestamptz
+  plannedMinutes Int?        @map("planned_minutes")
+  actualMinutes Int?         @map("actual_minutes")
+  status        String       // running, completed, abandoned
+  energyBefore  Int?         @map("energy_before")
+  energyAfter   Int?         @map("energy_after")
+
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  goal          DailyGoal?   @relation(fields: [goalId], references: [id], onDelete: SetNull)
+  roadmapNode   RoadmapNode? @relation(fields: [roadmapNodeId], references: [id], onDelete: SetNull)
+
+  @@map("focus_sessions")
+}
+
+// Domain: Hackathons (P2)
+model Hackathon {
+  id          String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  title       String
+  description String
+  startDate   DateTime        @map("start_date") @db.Timestamptz
+  endDate     DateTime        @map("end_date") @db.Timestamptz
+  status      String          @default("upcoming") // upcoming, active, ended
+  createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz
+
+  teams       HackathonTeam[]
+
+  @@map("hackathons")
+}
+
+model HackathonTeam {
+  id           String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  hackathonId  String                @map("hackathon_id") @db.Uuid
+  name         String
+  projectTitle String?               @map("project_title")
+  repoUrl      String?               @map("repo_url")
+  createdAt    DateTime              @default(now()) @map("created_at") @db.Timestamptz
+
+  hackathon    Hackathon             @relation(fields: [hackathonId], references: [id], onDelete: Cascade)
+  members      HackathonTeamMember[]
+  submissions  HackathonSubmission[]
+
+  @@map("hackathon_teams")
+}
+
+model HackathonTeamMember {
+  teamId   String        @map("team_id") @db.Uuid
+  userId   String        @map("user_id") @db.Uuid
+  role     String        @default("member") // leader, member
+
+  team     HackathonTeam @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([teamId, userId])
+  @@map("hackathon_team_members")
+}
+
+model HackathonSubmission {
+  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  teamId        String        @map("team_id") @db.Uuid
+  pitchDeckUrl  String?       @map("pitch_deck_url")
+  demoVideoUrl  String?       @map("demo_video_url")
+  submittedAt   DateTime      @default(now()) @map("submitted_at") @db.Timestamptz
+
+  team          HackathonTeam @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@map("hackathon_submissions")
+}
+
+// Domain: Daily Analytics Consolidation
+model DailyUserMetric {
+  userId                String   @map("user_id") @db.Uuid
+  metricDate            DateTime @map("metric_date") @db.Date
+  studyMinutes          Int      @default(0) @map("study_minutes")
+  goalsCompleted        Int      @default(0) @map("goals_completed")
+  codingAttempts        Int      @default(0) @map("coding_attempts")
+  codingAccepts         Int      @default(0) @map("coding_accepts")
+  roadmapNodesCompleted Int      @default(0) @map("roadmap_nodes_completed")
+  aiQuestionsAsked      Int      @default(0) @map("ai_questions_asked")
+  notesProcessed        Int      @default(0) @map("notes_processed")
+  xpEarned              Int      @default(0) @map("xp_earned")
+  activeStreakDays      Int      @default(0) @map("active_streak_days")
+
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, metricDate])
+  @@map("daily_user_metrics")
+}
