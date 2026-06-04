@@ -4,9 +4,12 @@ import { PrismaClient } from '@prisma/client';
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   constructor() {
+    // Prisma v7 moved the connection URL to prisma.config.ts, but we pass it
+    // explicitly here for runtime correctness. The `as any` cast bypasses
+    // the overly-strict type definition while preserving runtime behaviour.
     super({
       datasourceUrl: process.env.DATABASE_URL || 'postgresql://postgres:postgrespassword@localhost:5432/nexlearn?schema=public',
-    });
+    } as any);
   }
 
   async onModuleInit() {

@@ -15,11 +15,7 @@ const client_1 = require("@prisma/client");
 let PrismaService = class PrismaService extends client_1.PrismaClient {
     constructor() {
         super({
-            datasources: {
-                db: {
-                    url: process.env.DATABASE_URL || 'postgresql://postgres:postgrespassword@localhost:5432/nexlearn?schema=public',
-                },
-            },
+            datasourceUrl: process.env.DATABASE_URL || 'postgresql://postgres:postgrespassword@localhost:5432/nexlearn?schema=public',
         });
     }
     async onModuleInit() {
