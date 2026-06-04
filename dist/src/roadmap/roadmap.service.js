@@ -69,7 +69,7 @@ let RoadmapService = class RoadmapService {
             if (prereqUuids.length > 0) {
                 await this.prisma.roadmapNode.update({
                     where: {
-                        roadmapId_sequenceNo: {
+                        idx_roadmap_nodes_sequence: {
                             roadmapId: roadmap.id,
                             sequenceNo: node.sequence_no,
                         },
