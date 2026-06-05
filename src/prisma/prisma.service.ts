@@ -1,15 +1,21 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
+import pg from 'pg';
 
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   constructor() {
-    // Prisma v7 moved the connection URL to prisma.config.ts, but we pass it
-    // explicitly here for runtime correctness. The `as any` cast bypasses
-    // the overly-strict type definition while preserving runtime behaviour.
-    super({
-      datasourceUrl: process.env.DATABASE_URL || 'postgresql://postgres:postgrespassword@localhost:5432/nexlearn?schema=public',
-    } as any);
+    // Prisma v7 requires a driver adapter for direct PostgreSQL connections.
+    // The connection URL is read from DATABASE_URL env variable.
+    const connectionString =
+      process.env.DATABASE_URL ||
+      'postgresql://postgres:postgrespassword@localhost:5432/nexlearn?schema=public';
+
+    const pool = new pg.Pool({ connectionString });
+    const adapter = new PrismaPg(pool);
+
+    super({ adapter });
   }
 
   async onModuleInit() {
